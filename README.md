@@ -237,16 +237,23 @@ real recurring cost can sneak into this project.
 
 ### Environment variable checklist
 
+**Required.** The app will not work without these four:
+
 | Variable | Where it goes | What it is |
 | --- | --- | --- |
-| `NEXT_PUBLIC_SUPABASE_URL` | Vercel | Supabase project URL |
+| `NEXT_PUBLIC_SUPABASE_URL` | Vercel | Supabase project URL. Origin only, no path, no trailing slash |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Vercel | The **Publishable key**. Restricted by Row Level Security. `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` also works |
 | `SUPABASE_SERVICE_ROLE_KEY` | Vercel | The **Secret key**. Bypasses RLS, server-side jobs only, never prefix with `NEXT_PUBLIC_`. `SUPABASE_SECRET_KEY` also works |
-| `JOB_SECRET` | Vercel **and** GitHub | Shared secret protecting `/api/jobs/*`. Same value in both places |
-| `NEXT_PUBLIC_SITE_URL` | Vercel | Your deployed URL, for absolute links |
-| `NEXT_PUBLIC_CONTACT_EMAIL` | Vercel | Optional. Shown on the dispute page |
-| `POLL_BRANDS_PER_RUN` | Vercel | Optional, defaults to 4 |
-| `RECHECK_BATCH_SIZE` | Vercel | Optional, defaults to 25 |
+| `JOB_SECRET` | Vercel **and** GitHub | Shared secret protecting `/api/jobs/*`. Must be byte-identical in both places |
+
+**Optional.** Everything works without them:
+
+| Variable | Where it goes | What it does |
+| --- | --- | --- |
+| `NEXT_PUBLIC_SITE_URL` | Vercel | Sets `metadataBase`, so social-preview and canonical links resolve against your domain instead of localhost. Add it after the first deploy, when you know the URL |
+| `NEXT_PUBLIC_CONTACT_EMAIL` | Vercel | Adds an email route to the dispute page, for people who would rather not use a form on the site that just listed them |
+| `POLL_BRANDS_PER_RUN` | Vercel | Brands per poll run. Defaults to 4 |
+| `RECHECK_BATCH_SIZE` | Vercel | Candidates re-verified per run. Defaults to 25 |
 
 ### GitHub repository secrets
 

@@ -13,6 +13,11 @@ import { Suspense, useState } from 'react';
  * wrongly listed needs a link, not an email address buried in a footer.
  */
 
+/** Optional. When set, the dispute page offers an email route as well as the
+ *  form - some people will not trust a form on a site that just listed their
+ *  domain, and the dispute path has to be easy to reach or it does not work. */
+const CONTACT_EMAIL = process.env.NEXT_PUBLIC_CONTACT_EMAIL;
+
 export default function ReportPage() {
   return (
     <Suspense fallback={<h1>Dispute or report a listing</h1>}>
@@ -148,6 +153,14 @@ function ReportForm() {
           {submitting ? 'Sending…' : 'Send report'}
         </button>
       </form>
+
+      {CONTACT_EMAIL && (
+        <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 20 }}>
+          If you would rather not use this form, email{' '}
+          <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a> instead. A dispute sent
+          either way reaches the same person.
+        </p>
+      )}
 
       <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 28 }}>
         For anything urgent involving an active phishing site, also report it to the

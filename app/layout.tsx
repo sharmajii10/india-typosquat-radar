@@ -3,6 +3,12 @@ import Link from 'next/link';
 import './globals.css';
 
 export const metadata: Metadata = {
+  // Without a metadataBase, Next resolves social-preview image and canonical
+  // URLs against localhost, which breaks them on the deployed site. Optional:
+  // if the variable is unset the site still works, it just has relative links.
+  metadataBase: process.env.NEXT_PUBLIC_SITE_URL
+    ? new URL(process.env.NEXT_PUBLIC_SITE_URL)
+    : undefined,
   title: 'India Typosquat Radar',
   description:
     'A free, public radar for newly-issued TLS certificates on domains that impersonate Indian banks, payment apps and government portals.',
