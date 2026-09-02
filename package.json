@@ -1,0 +1,39 @@
+{
+  "name": "india-typosquat-radar",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Public-good radar for newly-issued certificates on domains impersonating Indian banks, payment apps and government portals.",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "seed": "tsx scripts/seed.ts",
+    "job:poll": "tsx scripts/run-job.ts poll",
+    "job:recheck": "tsx scripts/run-job.ts recheck",
+    "check:weights": "tsx scripts/check-weights.ts",
+    "job:review": "tsx scripts/run-job.ts review",
+    "smoke": "tsx scripts/smoke-test.ts",
+    "check:rls": "tsx scripts/check-rls.ts"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.4",
+    "next": "16.3.4",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.16.10",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.5",
+    "@types/ws": "^8.18.1",
+    "dotenv": "^16.4.5",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.2",
+    "ws": "^8.21.3"
+  },
+  "engines": {
+    "node": ">=20.9.0"
+  }
+}

@@ -1,0 +1,59 @@
+name: Heartbeat
+
+# ---------------------------------------------------------------------------
+# Keeps the scheduled Radar workflow alive.
+#
+# GitHub automatically disables scheduled workflows in a public repository after
+# 60 days with no repository activity. That clock counts commits and pushes, not
+# workflow runs - so a radar that fires perfectly every 10 minutes for two months
+# will still be switched off if nobody commits anything in that time.
+#
+# This job writes a timestamp to .github/heartbeat.txt every three weeks and
+# pushes it. That is repository activity, so the 60-day timer resets and the
+# radar keeps running through quiet periods with no human intervention.
+#
+# Three weeks rather than eight because the timer must be reset comfortably
+# before it expires, and because a run can be dropped or fail without anyone
+# noticing on a project like this.
+# ---------------------------------------------------------------------------
+
+on:
+  schedule:
+    # 06:00 UTC on the 1st, 11th and 21st of each month.
+    - cron: '0 6 1,11,21 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  heartbeat:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Write heartbeat and push
+        run: |
+          set -euo pipefail
+          mkdir -p .github
+          {
+            echo "Last heartbeat: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+            echo ""
+            echo "This file exists only to create repository activity, so GitHub does not"
+            echo "auto-disable the scheduled Radar workflow after 60 days of quiet."
+            echo "Nothing reads it. It is safe to ignore in reviews."
+          } > .github/heartbeat.txt
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/heartbeat.txt
+
+          if git diff --staged --quiet; then
+            echo "Nothing changed; skipping commit."
+            exit 0
+          fi
+
+          git commit -m "chore: heartbeat to keep scheduled workflows enabled"
+          git push

@@ -1,0 +1,48 @@
+name: CI
+
+# Type check, build, and - most importantly - assert the scoring invariants.
+# The weights check is the mechanical form of this project's core principle:
+# name similarity alone must never be able to publish an accusation.
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '.github/heartbeat.txt'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Scoring invariants
+        run: npm run check:weights
+
+      - name: Pipeline smoke test
+        run: npm run smoke
+
+      - name: Build
+        run: npm run build
+        env:
+          # Placeholder values. The build must succeed without real credentials,
+          # because pages render a "not configured" state rather than throwing.
+          NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: placeholder-anon-key

@@ -1,0 +1,134 @@
+name: Radar
+
+# ---------------------------------------------------------------------------
+# The scheduler for the whole project.
+#
+# Why this and not Vercel Cron: on Vercel's Hobby plan, cron jobs are limited to
+# one run per day, and that run only fires somewhere within its scheduled hour.
+# A feed that claims to be live cannot be built on that. GitHub Actions allows a
+# 5-minute floor and is free with no minute cap on public repositories, so the
+# schedule lives here and Vercel just hosts secured endpoints for it to call.
+#
+# This also solves a second problem for free. Supabase pauses a free-tier project
+# after 7 days with no database activity. Both calls below query and write the
+# database on every run, so that timer never gets close to expiring. No separate
+# keep-alive service is needed.
+#
+# Note on timing: GitHub does not guarantee scheduled runs fire on the minute,
+# and drops runs entirely when the platform is busy. Expect roughly-every-10-15
+# minutes, not exactly. That is fine for this workload - CT logs are append-only,
+# and the poll uses a lookback window rather than a cursor, so a missed run costs
+# nothing.
+# ---------------------------------------------------------------------------
+
+on:
+  schedule:
+    # Every 10 minutes. 5 is GitHub's floor; 10 leaves headroom and is well
+    # inside the lookback window below, so nothing is missed if a run is dropped.
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+    inputs:
+      lookbackHours:
+        description: 'How far back to look in CT logs'
+        required: false
+        default: '6'
+      brands:
+        description: 'How many brands to poll this run'
+        required: false
+        default: '4'
+
+# Never let two runs overlap - they would duplicate crt.sh queries and race on
+# the same candidate rows. A queued run is simply dropped, which is correct here.
+concurrency:
+  group: radar
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  radar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+
+    steps:
+      - name: Check required secrets
+        env:
+          BASE_URL: ${{ secrets.RADAR_BASE_URL }}
+          JOB_SECRET: ${{ secrets.JOB_SECRET }}
+        run: |
+          if [ -z "$BASE_URL" ] || [ -z "$JOB_SECRET" ]; then
+            echo "::error::RADAR_BASE_URL and JOB_SECRET must both be set as repository secrets."
+            echo "See the README section 'Deploying' for how to create them."
+            exit 1
+          fi
+
+      # --- Poll Certificate Transparency ---------------------------------
+      # lookbackHours of 6 against a 10-minute schedule is heavy overlap on
+      # purpose. crt.sh occasionally indexes late, GitHub occasionally drops a
+      # scheduled run, and re-seeing a certificate is free - the ingest layer
+      # deduplicates by domain. Under-polling loses detections permanently;
+      # over-polling costs nothing.
+      - name: Poll CT logs
+        env:
+          BASE_URL: ${{ secrets.RADAR_BASE_URL }}
+          JOB_SECRET: ${{ secrets.JOB_SECRET }}
+          LOOKBACK: ${{ github.event.inputs.lookbackHours || '6' }}
+          BRANDS: ${{ github.event.inputs.brands || '4' }}
+        run: |
+          set -euo pipefail
+          echo "Polling ${BASE_URL}/api/jobs/poll"
+          status=$(curl --silent --show-error --location \
+            --max-time 120 \
+            --write-out '%{http_code}' \
+            --output poll-response.json \
+            --request POST \
+            --header "Authorization: Bearer ${JOB_SECRET}" \
+            "${BASE_URL}/api/jobs/poll?lookbackHours=${LOOKBACK}&brands=${BRANDS}")
+          echo "HTTP ${status}"
+          cat poll-response.json | head -c 4000
+          echo ""
+          if [ "$status" -lt 200 ] || [ "$status" -ge 300 ]; then
+            echo "::error::Poll job failed with HTTP ${status}"
+            exit 1
+          fi
+
+      # --- Verify and re-verify -------------------------------------------
+      # Runs every cycle, not just after a poll. This is the recheck loop: fresh
+      # candidates get their first verification, and existing ones get re-judged
+      # on the schedule set in lib/config.ts. A domain that was parked last week
+      # and serves a login page today is caught here, not by the poll.
+      - name: Verify and recheck candidates
+        env:
+          BASE_URL: ${{ secrets.RADAR_BASE_URL }}
+          JOB_SECRET: ${{ secrets.JOB_SECRET }}
+        run: |
+          set -euo pipefail
+          echo "Rechecking ${BASE_URL}/api/jobs/recheck"
+          status=$(curl --silent --show-error --location \
+            --max-time 120 \
+            --write-out '%{http_code}' \
+            --output recheck-response.json \
+            --request POST \
+            --header "Authorization: Bearer ${JOB_SECRET}" \
+            "${BASE_URL}/api/jobs/recheck")
+          echo "HTTP ${status}"
+          cat recheck-response.json | head -c 4000
+          echo ""
+          if [ "$status" -lt 200 ] || [ "$status" -ge 300 ]; then
+            echo "::error::Recheck job failed with HTTP ${status}"
+            exit 1
+          fi
+
+      - name: Summarise
+        if: always()
+        run: |
+          {
+            echo "### Radar run"
+            echo ""
+            echo '```json'
+            head -c 2000 poll-response.json 2>/dev/null || echo "no poll response"
+            echo ""
+            head -c 2000 recheck-response.json 2>/dev/null || echo "no recheck response"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
