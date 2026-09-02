@@ -110,7 +110,7 @@ export const CONTENT_MAX_REDIRECTS = 3;
  * operator must be able to tell what hit them.
  */
 export const SCANNER_USER_AGENT =
-  'IndiaTyposquatRadar/0.1 (+https://github.com/YOUR-GITHUB-USER/india-typosquat-radar; passive single-GET scanner; non-commercial public-good research)';
+  'IndiaTyposquatRadar/0.1 (+https://github.com/sharmajii10/india-typosquat-radar; passive single-GET scanner; non-commercial public-good research)';
 
 /** DNS resolution timeout per lookup type. */
 export const DNS_TIMEOUT_MS = 5000;
