@@ -252,6 +252,7 @@ real recurring cost can sneak into this project.
 | --- | --- | --- |
 | `NEXT_PUBLIC_SITE_URL` | Vercel | Sets `metadataBase`, so social-preview and canonical links resolve against your domain instead of localhost. Add it after the first deploy, when you know the URL |
 | `NEXT_PUBLIC_CONTACT_EMAIL` | Vercel | Adds an email route to the dispute page, for people who would rather not use a form on the site that just listed them |
+| `REVIEW_PASSWORD` | Vercel | Password for the reviewer UI at `/review`. At least 16 characters. Falls back to `JOB_SECRET` if unset, but a separate password is better - the job secret is also stored in GitHub Actions |
 | `POLL_BRANDS_PER_RUN` | Vercel | Brands per poll run. Defaults to 4 |
 | `RECHECK_BATCH_SIZE` | Vercel | Candidates re-verified per run. Defaults to 25 |
 
@@ -356,6 +357,37 @@ A wrongly published legitimate business is a real harm to a real person.
 Every score is stored with its full itemised evidence in
 `risk_scores.contributing_signals`, so retuning can be back-tested against
 everything the pipeline has ever seen.
+
+---
+
+## The review queue
+
+Medium-tier candidates never auto-publish. They wait at **`/review`** for a
+person, and appear on the public feed only as "unconfirmed" until decided.
+
+Sign in with `REVIEW_PASSWORD`. Each item shows everything needed to decide
+without opening another tab: the itemised evidence that produced the score, what
+argued against it, the facts behind it, and any dispute somebody has filed.
+Disputed items sort to the top, because someone actively saying a listing is
+wrong about them is the most urgent thing in the queue.
+
+Three decisions:
+
+| Button | Effect |
+| --- | --- |
+| **Publish** | Goes on the public feed as a high-confidence detection |
+| **Not a threat** | Permanently allowlisted, so no future scan can flag it again, and any dispute about it is resolved. Requires a reason |
+| **Keep hidden** | Off the feed, still tracked and re-checked. Right for something suspicious that is not yet live |
+
+Clearing is styled as the safe, easy path and publishing as the consequential
+one. That asymmetry is deliberate: publishing a wrong accusation harms a real
+business, whereas missing a real phishing site costs a detection this project
+was never going to be alone in making.
+
+The same decisions are available over curl for scripting, at
+`/api/jobs/review`, behind `JOB_SECRET`. Both call the same
+`applyReviewDecision`, so they cannot drift - and the step that would drift is
+the allowlist write, which is what makes a correction permanent.
 
 ---
 
@@ -551,7 +583,9 @@ Built on Next.js 16 (App Router) and React 19, so route `params` and
 | `lib/ct/crtsh.ts` | The Certificate Transparency source |
 | `lib/pipeline/` | Ingest and assess — the only writers of `publish_state` |
 | `app/api/jobs/` | Secured endpoints the GitHub workflow calls |
-| `app/api/` | Public read API: feed, brands, stats, candidate detail, report |
+| `app/api/` | Public read API: feed, brands, stats, candidate detail, report, health |
+| `app/review/` | The human review queue UI, behind a password |
+| `lib/pipeline/review.ts` | The review decision, shared by the UI and the curl endpoint |
 | `supabase/migrations/` | Schema and Row Level Security |
 | `scripts/` | Seed, job runner, weights invariant check, pipeline smoke test, RLS self-test |
 
@@ -571,8 +605,9 @@ Built on Next.js 16 (App Router) and React 19, so route `params` and
   `lib/verify/asn.ts` explains why every available source is either paid,
   licence-restricted, or stale enough to mostly penalise small Indian hosting
   providers — which is the exact false-positive this project cannot afford.
-- **A reviewer UI.** The human review queue is currently a secured JSON endpoint
-  driven by curl. It works, which beats a prettier queue that does not exist yet.
+- **Real reviewer accounts.** The reviewer UI is behind a single shared
+  password, which cannot tell you who cleared a domain. Fine for one operator;
+  replace it with real accounts before a second person reviews.
 
 ---
 

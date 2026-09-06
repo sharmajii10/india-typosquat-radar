@@ -458,3 +458,85 @@ h1 {
   margin: 0;
   max-width: 70ch;
 }
+
+/* --- reviewer UI ----------------------------------------------------------
+   Deliberately denser than the public feed. This is a working surface for one
+   person going through a list, not a page to be read once. */
+.review-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+.review-section {
+  font-size: 15px;
+  letter-spacing: -0.01em;
+  margin: 32px 0 12px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+}
+.review-card {
+  margin-bottom: 14px;
+}
+.review-evidence {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 20px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.review-evidence h4 {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-faint);
+  margin: 0 0 8px;
+  font-weight: 600;
+}
+.review-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.review-actions input[type='text'] {
+  flex: 1 1 260px;
+  width: auto;
+}
+.review-buttons {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.review-buttons button {
+  align-self: auto;
+  padding: 8px 14px;
+  font-size: 13.5px;
+}
+/* Publishing makes a public accusation, so it reads as the consequential one. */
+button.danger {
+  background: var(--high);
+  border-color: var(--high);
+  color: #fff;
+}
+/* Clearing is the safe correction and should never feel like the hard path. */
+button.safe {
+  background: var(--ok);
+  border-color: var(--ok);
+  color: #fff;
+}
+button.ghost {
+  background: transparent;
+  border-color: var(--border-strong);
+  color: var(--text-muted);
+}
+button.ghost:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--text-muted);
+}
