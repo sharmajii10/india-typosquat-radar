@@ -391,6 +391,34 @@ the allowlist write, which is what makes a correction permanent.
 
 ---
 
+## Known limitation: GitHub does not honour the schedule
+
+`radar.yml` asks for a run every 10 minutes. **GitHub delivers roughly one every
+two hours.** Measured over 20 consecutive scheduled runs on this repository, the
+gaps ranged from 97 to 310 minutes, with a median near 120.
+
+This is documented GitHub behaviour rather than a fault: scheduled workflows are
+best-effort, are delayed during periods of high load, and are dropped outright
+when the runner pool is busy. High-frequency crons on free public repositories
+are throttled hardest. Lowering the cron interval does not help, and may make it
+worse.
+
+What this means in practice:
+
+- **Detection latency is hours, not minutes.** Any claim that this is a
+  real-time radar should be read with that in mind.
+- **Nothing is missed.** The poll asks for a six-hour lookback window rather than
+  tracking a cursor, so a two-hour gap is covered several times over. Slower, not
+  lossy.
+- **A full brand sweep takes longer.** At 4 brands per run and 15 brands, one
+  complete rotation now takes most of a day rather than 40 minutes.
+
+If genuine minute-level latency ever matters, the fix is not a different cron.
+It is a long-running process consuming CT logs directly, which is the same change
+that would remove the crt.sh dependency below.
+
+---
+
 ## Known operational risk: crt.sh availability
 
 **crt.sh is unreliable, and it is the only data source.** This is the biggest
@@ -549,7 +577,7 @@ Everything here is free with no card, no trial, and no expiry.
 | --- | --- | --- |
 | Hosting | Vercel Hobby | Free indefinitely for personal, non-commercial use. Keep it non-commercial: no ads, no sponsors, no donation button that starts looking like a business |
 | Database | Supabase free tier | Free indefinitely. Pauses after 7 days of database inactivity, which the 10-minute job schedule prevents |
-| Scheduling | GitHub Actions | Free and unmetered on public repositories. 5-minute floor; this uses 10 |
+| Scheduling | GitHub Actions | Free and unmetered on public repositories. 5-minute floor; this asks for 10, and GitHub delivers roughly every 2 hours - see below |
 | CT logs | crt.sh | Free public service, no key |
 | Registration data | RDAP | Free, served directly by registries, no key |
 | DNS | Public resolvers | Free |

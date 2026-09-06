@@ -10,8 +10,11 @@ import { deadlineIn, outOfTime, remainingMs } from '@/lib/util/deadline';
  * POST /api/jobs/poll
  *
  * Polls crt.sh for a rotating slice of the brand watchlist and writes any name
- * matches as hidden candidates. Called every 10-15 minutes by the GitHub Actions
- * workflow in .github/workflows/radar.yml.
+ * matches as hidden candidates. Called by the GitHub Actions workflow in
+ * .github/workflows/radar.yml, which asks for every 10 minutes and in practice
+ * gets roughly every 2 hours - GitHub throttles scheduled workflows heavily.
+ * The lookback window is sized for that gap, so latency suffers but nothing is
+ * lost. See the README section on the schedule.
  *
  * Why not Vercel Cron: on the Hobby plan cron is limited to one run per day, and
  * that run only fires somewhere inside its scheduled hour. Neither is compatible
