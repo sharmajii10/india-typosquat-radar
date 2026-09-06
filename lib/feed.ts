@@ -27,6 +27,10 @@ export interface FeedRow {
   brand_name: string;
   brand_slug: string;
   brand_category: string;
+  /** First entry of the brand's official_domains, added in migration 0004.
+   *  Optional on the type so a deployment that has not run that migration yet
+   *  degrades to "no comparison shown" instead of throwing. */
+  brand_official_domain?: string | null;
   score: number | null;
   tier: string | null;
   contributing_signals: Signal[] | null;
@@ -51,7 +55,8 @@ export function toFeedItem(row: FeedRow): FeedItem {
     brand: {
       name: row.brand_name,
       slug: row.brand_slug,
-      category: row.brand_category as FeedItem['brand']['category']
+      category: row.brand_category as FeedItem['brand']['category'],
+      officialDomain: row.brand_official_domain ?? null
     },
     tier,
     score: row.score ?? 0,

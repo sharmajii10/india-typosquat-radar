@@ -105,6 +105,26 @@ export default async function CandidatePage({
         <tbody>
           <Row label="Domain" value={item.domain} mono />
           <Row label="Resembles" value={item.brand.name} />
+          {item.brand.officialDomain && (
+            <Row
+              label="That brand's real domain"
+              mono
+              value={
+                // Safe to link, unlike the row above it. Putting the two
+                // addresses one line apart is the whole point of this row:
+                // the reader compares them directly instead of taking our
+                // word for the resemblance.
+                <a
+                  className="official-link"
+                  href={`https://${item.brand.officialDomain}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  {item.brand.officialDomain}
+                </a>
+              }
+            />
+          )}
           <Row label="Certificate issuer" value={item.certIssuer ?? 'unknown'} />
           <Row
             label="Certificate issued"
@@ -187,7 +207,16 @@ const cell: React.CSSProperties = {
   verticalAlign: 'top'
 };
 
-function Row({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+function Row({
+  label,
+  value,
+  mono
+}: {
+  label: string;
+  // ReactNode rather than string so one row can carry the official-domain link.
+  value: React.ReactNode;
+  mono?: boolean;
+}) {
   return (
     <tr>
       <td style={{ ...cell, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{label}</td>

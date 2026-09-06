@@ -70,8 +70,10 @@ export async function POST(req: Request): Promise<Response> {
 
     // Round-robin: least recently polled first, so every brand gets covered over
     // a handful of runs without any single run exceeding the function's time
-    // budget. With 15 brands at 4 per run every 10 minutes, a full sweep takes
-    // about 40 minutes.
+    // budget. With 26 brands at 4 per run that is 7 runs for a full sweep - and
+    // since GitHub delivers this schedule roughly every 2 hours rather than the
+    // 10 minutes it asks for, a sweep takes most of a day. See the README
+    // section on the schedule; this is why crt.sh is the secondary source now.
     const rotation = [...brands].sort((a, b) => {
       const at = a.last_polled_at ? Date.parse(a.last_polled_at) : 0;
       const bt = b.last_polled_at ? Date.parse(b.last_polled_at) : 0;

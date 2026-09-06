@@ -56,6 +56,23 @@ function FeedRow({ item }: { item: FeedItem }) {
       <div className="item-meta">
         <span>
           Resembles <b>{item.brand.name}</b>
+          {item.brand.officialDomain && (
+            <>
+              {', whose real site is '}
+              {/* The one domain on this page that IS safe to link, and the
+                  contrast is the point: the suspected domain above is inert
+                  text, the genuine one is reachable. Anyone who cannot tell the
+                  two apart by eye is precisely who a typosquat works on. */}
+              <a
+                className="official-link"
+                href={`https://${item.brand.officialDomain}`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {item.brand.officialDomain}
+              </a>
+            </>
+          )}
         </span>
         <span>
           First seen <b>{relativeTime(item.firstSeenAt)}</b>

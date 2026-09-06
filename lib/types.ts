@@ -170,7 +170,20 @@ export interface FeedItem {
   id: string;
   domain: string;
   unicodeDomain: string | null;
-  brand: { name: string; slug: string; category: BrandCategory };
+  brand: {
+    name: string;
+    slug: string;
+    category: BrandCategory;
+    /**
+     * The brand's canonical domain, for showing beside the flagged one.
+     *
+     * A reader who already knows what the real address looks like does not need
+     * this project; a reader who does not is exactly who a typosquat is aimed
+     * at. Null when the brand has no official domain recorded, which the UI
+     * renders as nothing rather than as an empty link.
+     */
+    officialDomain: string | null;
+  };
   tier: Tier;
   score: number;
   confirmed: boolean;

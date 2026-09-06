@@ -104,14 +104,23 @@ Both formats work.
 
 ### 3. Run the migrations
 
-In the Supabase dashboard, open **SQL Editor** and run these two files in order:
+In the Supabase dashboard, open **SQL Editor** and run these files in order:
 
 1. `supabase/migrations/0001_init.sql` — tables, indexes and views
 2. `supabase/migrations/0002_rls.sql` — Row Level Security policies
+3. `supabase/migrations/0003_ct_logs.sql` — per-log cursors for the CT scanner
+4. `supabase/migrations/0004_brand_official_domain.sql` — puts each brand's real
+   domain on the feed, so a reader can compare it against the flagged one
 
 The second one matters more than it looks. It is what makes the anon key, which
 ships to every browser, unable to read low-tier candidates even if a bug in a
 route handler asks for them.
+
+`0004` replaces the `public_feed` view, and a replaced view can come back
+running as its owner rather than as the querying role — which bypasses Row
+Level Security silently, leaving a working site with a world-readable internal
+candidate list. It re-applies `security_invoker` for that reason. Run
+`npm run check:rls` afterwards; that is what proves it.
 
 ### 4. Configure environment variables
 
@@ -135,7 +144,7 @@ of 32 or more characters works.
 npm run seed
 ```
 
-This writes the fifteen seed brands and their allowlist entries. It is
+This writes the twenty-six seed brands and their allowlist entries. It is
 idempotent, so re-run it any time you edit the watchlist.
 
 ### 6. Prove Row Level Security actually works
@@ -197,7 +206,7 @@ Open http://localhost:3000. The feed will be empty until you ingest something.
 In a second terminal, with the dev server still running:
 
 ```bash
-npm run job:poll -- --lookbackHours 24 --brands 15
+npm run job:poll -- --lookbackHours 24 --brands 26
 ```
 
 That queries crt.sh for every brand, matches what comes back, and writes hidden
@@ -312,6 +321,16 @@ this project — more so than any scoring weight.** Three rules:
   `excludeTerms`.
 - **Never add an ordinary English or Hindi word.** `axis` is excluded from Axis
   Bank for exactly this reason.
+- **And never add one that is within two edits of an ordinary word**, because
+  terms of six characters or more are matched fuzzily. This one is not
+  hypothetical. `canara` for Canara Bank is one substitution away from `canary`,
+  and AWS issues certificates for `canary.s3.<region>.vpce.amazonaws.com` in
+  enormous volume. Adding it took the CT pre-filter from 0.033% of entries to
+  **1.63%** — a 49x increase, essentially all of it AWS health-check endpoints.
+  Canara Bank now matches on `canarabank` only. The cost is real and worth
+  naming: `canara-kyc.in` would no longer be flagged. That is the trade the
+  measurement forced, and the measurement is the only reason it was visible —
+  the term looked perfectly sensible in review.
 - **Watch what gets derived automatically.** Terms are generated from the brand
   name and from the registrable label of each official domain. Google Pay's
   official domain is `pay.google.com`, whose label is `google` — which would flag
@@ -331,6 +350,20 @@ Term length changes behaviour, by design:
 Add the brand's subsidiaries and campaign domains to `ALLOWLIST_SEED` in the same
 file. Allowlisted domains are excluded at the very top of the pipeline and can
 never be flagged.
+
+### Measure the term before you trust it
+
+Reading the seed output is not enough — `canara` looked fine there. After
+seeding, run the scanner against live logs without writing anything:
+
+```bash
+npm run ct:scan -- --dry-run --minutes 2 --logs 2 --base https://your-project.vercel.app
+```
+
+The number to watch is the hit rate on the last line. Baseline is **0.033%**.
+If a new term has pushed it into the percents, the sample of matched names
+printed above it will usually name the culprit in one glance — a wall of
+identical infrastructure hostnames from one provider is the signature.
 
 ---
 
@@ -410,7 +443,7 @@ What this means in practice:
 - **Nothing is missed.** The poll asks for a six-hour lookback window rather than
   tracking a cursor, so a two-hour gap is covered several times over. Slower, not
   lossy.
-- **A full brand sweep takes longer.** At 4 brands per run and 15 brands, one
+- **A full brand sweep takes longer.** At 4 brands per run and 26 brands, one
   complete rotation now takes most of a day rather than 40 minutes.
 
 If genuine minute-level latency ever matters, the fix is not a different cron.
@@ -542,7 +575,7 @@ Everything below was actually run, not assumed:
 | `npm audit` | 0 vulnerabilities |
 | `npm run seed` | Reaches the network on Node 20 with either key naming |
 | `npm run check:rls` | 10 checks, all passing against a live Supabase project |
-| `npm run seed` | 15 brands and 21 allowlist entries written to a live project |
+| `npm run seed` | 26 brands and 26 allowlist entries written to a live project |
 | Live poll run | Ran against crt.sh; ingest, dedupe and outage detection all exercised |
 | Public API | `/api/brands`, `/api/stats`, `/api/feed` all serving correctly |
 | DNS verification | Live, against real domains including `.co.in` |
@@ -608,8 +641,13 @@ These are requirements, not preferences.
   finding. The strongest phrasing used anywhere is "high confidence" — never
   "confirmed phishing", never "malicious". The pipeline observes behaviour; it
   does not adjudicate intent.
-- **Domains are never linked.** Suspected credential-harvesting pages appear as
-  plain text, never as clickable links.
+- **Suspected domains are never linked.** They appear as plain text, never as
+  clickable links. The one linkable address anywhere near a listing is the
+  *brand's own* official domain, shown beside the flagged one so a reader can
+  compare them directly — and the contrast is deliberate: the suspected domain
+  is inert text, the genuine one is reachable. It comes from `official_domains`
+  in the seed, is set in the same monospace face so the two are visually
+  comparable, and is labelled as the real site every place it appears.
 - **The dispute path was built in the first pass**, not bolted on. A cleared
   domain is added to the allowlist permanently and cannot be re-flagged by a
   later scan.

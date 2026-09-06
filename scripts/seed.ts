@@ -109,6 +109,87 @@ const BRAND_SEED: BrandSeed[] = [
     aliases: ['kotak', 'kotakbank', 'kotakmahindra'],
     excludeTerms: ['kotakmahindrabank']
   },
+  {
+    name: 'Punjab National Bank',
+    slug: 'pnb',
+    category: 'bank',
+    // pnbnet.org.in has no A record of its own but is delegated to PNB's own
+    // nameservers, which is what makes it verifiably theirs rather than a
+    // lookalike somebody else parked.
+    officialDomains: ['pnbindia.in', 'pnb.bank.in', 'pnbnet.org.in'],
+    aliases: ['pnb', 'pnbindia', 'pnbnet'],
+    // `pnb` is three characters, so it only ever matches as a whole token -
+    // `pnb-kyc.in` matches, `pnbhousing.com` does not. That is the behaviour we
+    // want: the group companies are a different business.
+    extraTerms: ['pnbnetbanking']
+  },
+  {
+    name: 'Bank of Baroda',
+    slug: 'bank-of-baroda',
+    category: 'bank',
+    officialDomains: [
+      'bankofbaroda.in',
+      'bankofbaroda.co.in',
+      'bankofbaroda.bank.in',
+      'bobibanking.com'
+    ],
+    aliases: ['bob', 'bankofbaroda', 'bobibanking'],
+    extraTerms: ['bobworld'],
+    // `bob` is a name, a word, and three characters. It would match thousands of
+    // unrelated domains and bury everything real.
+    excludeTerms: ['bob']
+  },
+  {
+    name: 'Canara Bank',
+    slug: 'canara-bank',
+    category: 'bank',
+    officialDomains: ['canarabank.com', 'canarabank.bank.in'],
+    aliases: ['canara', 'canarabank'],
+    extraTerms: ['canaranetbanking'],
+    // `canara` is one edit from `canary`, and AWS issues certificates for
+    // `canary.s3.<region>.vpce.amazonaws.com` in enormous volume. Left in, it
+    // took the CT pre-filter from 0.033% of entries to 1.63% - a 49x increase,
+    // essentially all of it AWS health-check endpoints. The rule against
+    // ordinary English words has to extend to terms within two edits of one.
+    excludeTerms: ['canara']
+  },
+  {
+    name: 'Union Bank of India',
+    slug: 'union-bank',
+    category: 'bank',
+    officialDomains: ['unionbankofindia.co.in', 'unionbankonline.co.in'],
+    aliases: ['unionbankofindia', 'unionbankonline'],
+    // Note what is NOT here: `union`. The term deriver only ever collapses the
+    // whole brand name, so `union` is never generated - but adding it as an
+    // alias would, and it is an ordinary English word. `unionbanking` is out
+    // for the same reason at one remove: it is a substring of
+    // `creditunionbanking.com`, and credit unions are a real industry.
+    excludeTerms: ['union']
+  },
+  {
+    name: 'Yes Bank',
+    slug: 'yes-bank',
+    category: 'bank',
+    officialDomains: ['yesbank.in'],
+    // `yesbank` only. `yes` on its own would be the single worst term in this
+    // file - it is one of the most common words in English. `yesonline` is out
+    // too: it looks specific but sits inside `sayyesonline.com` and similar.
+    aliases: ['yesbank']
+  },
+  {
+    name: 'IDFC First Bank',
+    slug: 'idfc-first',
+    category: 'bank',
+    officialDomains: ['idfcfirstbank.com'],
+    aliases: ['idfc', 'idfcfirst', 'idfcfirstbank']
+  },
+  {
+    name: 'IndusInd Bank',
+    slug: 'indusind',
+    category: 'bank',
+    officialDomains: ['indusind.com', 'indusind.bank.in'],
+    aliases: ['indusind', 'indusindbank']
+  },
 
   // --- Payments ------------------------------------------------------------
   {
@@ -167,6 +248,47 @@ const BRAND_SEED: BrandSeed[] = [
     officialDomains: ['bhimupi.org.in'],
     aliases: ['bhim', 'bhimupi'],
     extraTerms: ['bhimapp']
+  },
+  {
+    name: 'Airtel Payments Bank',
+    slug: 'airtel-payments-bank',
+    category: 'payment',
+    officialDomains: ['airtelbank.com', 'airtel.in'],
+    aliases: ['airtel', 'airtelbank', 'airtelpaymentsbank'],
+    // `airtel` is six characters and a coined brand name rather than a word, so
+    // it is safe to match fuzzily and as a substring. It does pull in Airtel's
+    // telecom estate, which is why airtel.com is allowlisted below.
+    extraTerms: ['airtelmoney', 'airtelthanks']
+  },
+  {
+    name: 'Amazon Pay',
+    slug: 'amazon-pay',
+    category: 'payment',
+    // Deliberately NOT amazon.in. Its registrable label is `amazon`, which the
+    // deriver would turn into a match term covering every Amazon-adjacent
+    // domain on the internet - the same trap as pay.google.com under Google Pay.
+    officialDomains: ['amazonpay.in'],
+    aliases: ['amazonpay'],
+    excludeTerms: ['amazon']
+  },
+  {
+    name: 'MobiKwik',
+    slug: 'mobikwik',
+    category: 'payment',
+    officialDomains: ['mobikwik.com'],
+    aliases: ['mobikwik'],
+    extraTerms: ['mobikwikwallet']
+  },
+  {
+    name: 'CRED',
+    slug: 'cred',
+    category: 'payment',
+    officialDomains: ['cred.club'],
+    // `cred` is four characters, so whole-token matching only: `cred-upi.in`
+    // matches, `credit-union.com` does not, because `credit` is a different
+    // token rather than a string containing this one.
+    aliases: ['cred', 'credclub'],
+    extraTerms: ['credupi']
   },
 
   // --- Government ----------------------------------------------------------
@@ -238,7 +360,16 @@ const ALLOWLIST_SEED: Array<{ domain: string; slug: string; reason: string }> = 
   { domain: 'nsdl.co.in', slug: 'income-tax', reason: 'NSDL, an authorised tax intermediary' },
   { domain: 'utiitsl.com', slug: 'income-tax', reason: 'UTIITSL, an authorised PAN service provider' },
   { domain: 'irctctourism.com', slug: 'irctc', reason: 'IRCTC Tourism, official' },
-  { domain: 'irctcair.com', slug: 'irctc', reason: 'IRCTC Air, official' }
+  { domain: 'irctcair.com', slug: 'irctc', reason: 'IRCTC Air, official' },
+  // The three below are load-bearing rather than decorative: `canara` and
+  // `airtel` are long enough to match as substrings, so without these entries
+  // the matcher would flag each company's own group sites as lookalikes of
+  // itself on the first scan that saw them.
+  { domain: 'canarahsbclife.com', slug: 'canara-bank', reason: 'Canara HSBC Life Insurance, a Canara Bank joint venture' },
+  { domain: 'canararobeco.com', slug: 'canara-bank', reason: 'Canara Robeco Mutual Fund, a Canara Bank joint venture' },
+  { domain: 'airtel.com', slug: 'airtel-payments-bank', reason: 'Bharti Airtel global site, parent of Airtel Payments Bank' },
+  { domain: 'pnbhousing.com', slug: 'pnb', reason: 'PNB Housing Finance, a PNB group company' },
+  { domain: 'pnbmetlife.com', slug: 'pnb', reason: 'PNB MetLife Insurance, a PNB group company' }
 ];
 
 async function main() {
