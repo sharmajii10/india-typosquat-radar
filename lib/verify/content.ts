@@ -5,6 +5,7 @@ import {
   SCANNER_USER_AGENT
 } from '@/lib/config';
 import type { ContentResult } from '@/lib/types';
+import { boundedTimeout } from '@/lib/util/deadline';
 
 /**
  * Verification signal 3: a single passive HTTP GET.
@@ -51,6 +52,9 @@ const CREDENTIAL_MARKERS = [
 
 export interface ContentCheckInput {
   domain: string;
+  /** Absolute epoch-ms budget for the whole job. Both scheme attempts are
+   *  clamped to what is left of it. */
+  deadlineAt: number;
   /** Brand name and match terms to look for in the page. */
   brandTerms: string[];
   /** A records from the DNS step. Used for the private-address guard, and to
@@ -84,6 +88,9 @@ export async function checkContent(input: ContentCheckInput): Promise<ContentRes
   // one. Fall back to HTTP once, because kits are frequently misconfigured and a
   // plain-HTTP login form is if anything more damning.
   for (const scheme of ['https', 'http'] as const) {
+    if (boundedTimeout(input.deadlineAt, CONTENT_FETCH_TIMEOUT_MS) <= 0) {
+      return { ...empty, attempted: true, error: 'skipped: job budget exhausted' };
+    }
     const result = await fetchOnce(`${scheme}://${input.domain}/`, input);
     if (result) return result;
   }
@@ -96,7 +103,10 @@ async function fetchOnce(
   input: ContentCheckInput
 ): Promise<ContentResult | null> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), CONTENT_FETCH_TIMEOUT_MS);
+  const timer = setTimeout(
+    () => controller.abort(),
+    boundedTimeout(input.deadlineAt, CONTENT_FETCH_TIMEOUT_MS)
+  );
 
   try {
     const res = await fetch(url, {

@@ -1,5 +1,6 @@
 import { Resolver } from 'node:dns/promises';
 import { DNS_TIMEOUT_MS } from '@/lib/config';
+import { boundedTimeout } from '@/lib/util/deadline';
 import type { DnsResult } from '@/lib/types';
 
 /**
@@ -41,17 +42,29 @@ import type { DnsResult } from '@/lib/types';
  * `tries: 2` for the same reason - DNS over UDP drops packets often enough that
  * a single attempt makes results non-deterministic.
  */
-function makeResolver(): Resolver {
-  return new Resolver({ timeout: DNS_TIMEOUT_MS, tries: 2 });
+function makeResolver(timeoutMs: number): Resolver {
+  return new Resolver({ timeout: timeoutMs, tries: 2 });
 }
 
-export async function checkDns(domain: string): Promise<DnsResult> {
-  const resolver = makeResolver();
+/**
+ * `deadlineAt` is the job's absolute budget. Each lookup shrinks its timeout to
+ * what is left, so four sequential lookups against an unresponsive nameserver
+ * cannot outlast the function invocation.
+ */
+export async function checkDns(domain: string, deadlineAt: number): Promise<DnsResult> {
+  // Reserve room for the RDAP and content checks that follow this one.
+  const perLookup = () => boundedTimeout(deadlineAt, DNS_TIMEOUT_MS);
 
-  const a = await safe(() => resolver.resolve4(domain));
-  const aaaa = await safe(() => resolver.resolve6(domain));
-  const mx = await safe(() => resolver.resolveMx(domain));
-  const ns = await safe(() => resolver.resolveNs(domain));
+  const lookup = async <T>(fn: (r: Resolver) => Promise<T>) => {
+    const timeoutMs = perLookup();
+    if (timeoutMs <= 0) return { value: null, code: 'BUDGET_EXHAUSTED' };
+    return safe(() => fn(makeResolver(timeoutMs)));
+  };
+
+  const a = await lookup((r) => r.resolve4(domain));
+  const aaaa = await lookup((r) => r.resolve6(domain));
+  const mx = await lookup((r) => r.resolveMx(domain));
+  const ns = await lookup((r) => r.resolveNs(domain));
 
   const aRecords = [...(a.value ?? []), ...(aaaa.value ?? [])];
   const nsRecords = ns.value ?? [];

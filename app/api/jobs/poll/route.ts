@@ -4,6 +4,7 @@ import { crtshDelay, fetchRecentCerts } from '@/lib/ct/crtsh';
 import { recordJobRun, serviceClient } from '@/lib/db';
 import { ingestSightings, loadActiveBrands, loadAllowlist } from '@/lib/pipeline/ingest';
 import type { CertSighting } from '@/lib/types';
+import { deadlineIn, outOfTime, remainingMs } from '@/lib/util/deadline';
 
 /**
  * POST /api/jobs/poll
@@ -27,12 +28,25 @@ import type { CertSighting } from '@/lib/types';
 // deprecated, so the framework's own guidance is to omit it. This route needs the
 // Node runtime regardless - it uses node:dns, node:crypto and outbound fetch.
 export const dynamic = 'force-dynamic';
+
+/**
+ * Vercel Hobby's ceiling. The job's own budget (JOB_SOFT_DEADLINE_MS) sits well
+ * below this so it can finish its database writes and return a real response,
+ * rather than being killed and returning a 504 that records nothing.
+ */
 export const maxDuration = 60;
+
+/** Least remaining budget worth starting another crt.sh term with. */
+const MIN_TERM_BUDGET_MS = 6000;
 
 export async function POST(req: Request): Promise<Response> {
   if (!isAuthorizedJobRequest(req)) return unauthorized();
 
   const started = Date.now();
+  // One budget for the whole invocation, threaded into every network call so
+  // nothing can outlive it. Vercel kills the function at maxDuration and returns
+  // a 504 with nothing recorded, so the job must stop itself first.
+  const deadlineAt = deadlineIn(JOB_SOFT_DEADLINE_MS);
   const url = new URL(req.url);
   const lookbackHours = clamp(Number(url.searchParams.get('lookbackHours') ?? 6), 1, 168);
   const brandLimit = clamp(
@@ -63,6 +77,7 @@ export async function POST(req: Request): Promise<Response> {
 
     const sightings: CertSighting[] = [];
     const polled: string[] = [];
+    let ranOutOfTime = false;
     const failures: Array<{ brand: string; term: string; error: string }> = [];
     // Terms crt.sh answered with an empty array. Tracked separately from
     // failures because they arrive as HTTP 200 and would otherwise be
@@ -81,10 +96,14 @@ export async function POST(req: Request): Promise<Response> {
         .slice(0, 2);
 
       for (const term of terms) {
-        if (Date.now() - started > JOB_SOFT_DEADLINE_MS) break outer;
+        // Do not begin a query there is no time to finish.
+        if (outOfTime(deadlineAt, MIN_TERM_BUDGET_MS)) {
+          ranOutOfTime = true;
+          break outer;
+        }
 
         try {
-          const found = await fetchRecentCerts(term, { lookbackHours });
+          const found = await fetchRecentCerts(term, { lookbackHours, deadlineAt });
           sightings.push(...found.sightings);
           termsQueried++;
           if (found.rawRowCount > 0) termsWithRows++;
@@ -99,7 +118,7 @@ export async function POST(req: Request): Promise<Response> {
           });
         }
 
-        await crtshDelay();
+        await crtshDelay(deadlineAt);
       }
 
       polled.push(brand.slug);
@@ -125,6 +144,10 @@ export async function POST(req: Request): Promise<Response> {
       brands: polled,
       termsQueried,
       termsWithRows,
+      // Not an error. The job stops early on purpose rather than being killed
+      // mid-write; the next scheduled run continues the rotation.
+      stoppedEarlyForTime: ranOutOfTime,
+      budgetLeftMs: remainingMs(deadlineAt),
       lookbackHours,
       sightings: sightings.length,
       ...ingest,

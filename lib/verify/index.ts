@@ -20,15 +20,24 @@ export { checkAsn, checkContent, checkDns, lookupRdap };
  */
 export async function verifyDomain(
   domain: string,
-  brandTerms: string[]
+  brandTerms: string[],
+  deadlineAt: number
 ): Promise<VerificationBundle> {
-  const [dns, rdap] = await Promise.all([checkDns(domain), lookupRdap(domain)]);
+  // DNS and RDAP run concurrently: RDAP is independent of resolution, since a
+  // registered-but-unpointed domain still has a creation date. They are network
+  // calls to unrelated hosts, so the earlier DNS-concurrency problem (four
+  // queries sharing one resolver) does not apply here.
+  const [dns, rdap] = await Promise.all([
+    checkDns(domain, deadlineAt),
+    lookupRdap(domain, deadlineAt)
+  ]);
 
   // Content check only where there is something to fetch.
   const content = await checkContent({
     domain,
     brandTerms,
-    aRecords: dns.aRecords
+    aRecords: dns.aRecords,
+    deadlineAt
   });
 
   const asn = await checkAsn(dns.aRecords);

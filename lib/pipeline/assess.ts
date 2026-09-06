@@ -24,14 +24,15 @@ export interface AssessResult {
 export async function assessCandidate(
   db: SupabaseClient,
   candidate: Candidate,
-  brand: Brand
+  brand: Brand,
+  deadlineAt: number
 ): Promise<AssessResult> {
   // Terms to look for in the page body: the brand's display name plus its
   // match terms, so a cloned page that says "HDFC Bank" is caught as well as
   // one that only carries the token in a URL.
   const brandTerms = [brand.name, ...brand.match_terms, ...brand.aliases];
 
-  const bundle = await verifyDomain(candidate.domain, brandTerms);
+  const bundle = await verifyDomain(candidate.domain, brandTerms, deadlineAt);
 
   const { data: verificationRow, error: vErr } = await db
     .from('verifications')

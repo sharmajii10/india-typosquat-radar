@@ -1,5 +1,6 @@
 import { isAuthorizedJobRequest, unauthorized } from '@/lib/auth';
 import {
+  CANDIDATE_VERIFY_BUDGET_MS,
   INTER_REQUEST_DELAY_MS,
   JOB_SOFT_DEADLINE_MS,
   RECHECK_BATCH_SIZE
@@ -8,6 +9,7 @@ import { recordJobRun, serviceClient } from '@/lib/db';
 import { assessCandidate, loadDueCandidates } from '@/lib/pipeline/assess';
 import { loadActiveBrands } from '@/lib/pipeline/ingest';
 import type { Brand } from '@/lib/types';
+import { deadlineIn, outOfTime, remainingMs } from '@/lib/util/deadline';
 
 /**
  * POST /api/jobs/recheck
@@ -31,12 +33,15 @@ import type { Brand } from '@/lib/types';
 // deprecated, so the framework's own guidance is to omit it. This route needs the
 // Node runtime regardless - it uses node:dns, node:crypto and outbound fetch.
 export const dynamic = 'force-dynamic';
+
+/** Vercel Hobby's ceiling; the job budget sits well below it. */
 export const maxDuration = 60;
 
 export async function POST(req: Request): Promise<Response> {
   if (!isAuthorizedJobRequest(req)) return unauthorized();
 
   const started = Date.now();
+  const deadlineAt = deadlineIn(JOB_SOFT_DEADLINE_MS);
   const url = new URL(req.url);
   const limit = clamp(Number(url.searchParams.get('limit') ?? RECHECK_BATCH_SIZE), 1, 100);
 
@@ -52,11 +57,17 @@ export async function POST(req: Request): Promise<Response> {
     const errors: Array<{ domain: string; error: string }> = [];
     let published = 0;
     let queuedForReview = 0;
+    let ranOutOfTime = false;
 
     for (const candidate of due) {
-      // Stop cleanly before the platform kills the function mid-write. Anything
-      // not reached stays due and is picked up by the next run.
-      if (Date.now() - started > JOB_SOFT_DEADLINE_MS) break;
+      // Refuse to start a candidate there is no time to finish. One verification
+      // is up to four DNS lookups, an RDAP call and two HTTP fetches, so
+      // starting one with ten seconds left is how the function gets killed
+      // mid-write. Anything not reached stays due for the next run.
+      if (outOfTime(deadlineAt, CANDIDATE_VERIFY_BUDGET_MS)) {
+        ranOutOfTime = true;
+        break;
+      }
 
       const brand = brandsById.get(candidate.matched_brand_id);
       if (!brand) {
@@ -65,7 +76,7 @@ export async function POST(req: Request): Promise<Response> {
       }
 
       try {
-        const result = await assessCandidate(db, candidate, brand);
+        const result = await assessCandidate(db, candidate, brand, deadlineAt);
         results.push({
           domain: result.domain,
           score: result.score,
@@ -88,6 +99,8 @@ export async function POST(req: Request): Promise<Response> {
     return {
       due: due.length,
       checked: results.length,
+      stoppedEarlyForTime: ranOutOfTime,
+      budgetLeftMs: remainingMs(deadlineAt),
       published,
       queuedForReview,
       results,

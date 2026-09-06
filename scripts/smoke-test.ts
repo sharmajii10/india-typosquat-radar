@@ -399,7 +399,9 @@ const FIXTURE: CrtShRow[] = [
   }
 ];
 
-const parsed = parseRows(FIXTURE, { lookbackHours: 24 });
+// parseRows never makes a network call, so the deadline is irrelevant here;
+// it is a required field of PollOptions, so give it a far-future value.
+const parsed = parseRows(FIXTURE, { lookbackHours: 24, deadlineAt: Date.now() + 60_000 });
 const parsedNames = parsed.map((p) => p.name).sort();
 const issuers = [...new Set(parsed.map((p) => p.issuer))];
 

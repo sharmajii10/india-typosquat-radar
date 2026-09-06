@@ -93,8 +93,9 @@ export const MAX_LABEL_LENGTH = 63;
 // Verification.
 // ---------------------------------------------------------------------------
 
-/** Passive content check: single GET, hard timeout, no retries. */
-export const CONTENT_FETCH_TIMEOUT_MS = 8000;
+/** Passive content check: single GET, hard timeout, no retries. Tried twice at
+ *  most (https then http), so this is half the worst-case content cost. */
+export const CONTENT_FETCH_TIMEOUT_MS = 6000;
 
 /** Stop reading the body after this much HTML. Phishing pages are small; a
  *  200 MB response is either a mistake or a trap. */
@@ -112,11 +113,12 @@ export const CONTENT_MAX_REDIRECTS = 3;
 export const SCANNER_USER_AGENT =
   'IndiaTyposquatRadar/0.1 (+https://github.com/sharmajii10/india-typosquat-radar; passive single-GET scanner; non-commercial public-good research)';
 
-/** DNS resolution timeout per lookup type. */
-export const DNS_TIMEOUT_MS = 5000;
+/** DNS resolution timeout per lookup type. Four lookups run sequentially, so
+ *  this is a quarter of the worst-case DNS cost for one candidate. */
+export const DNS_TIMEOUT_MS = 3000;
 
 /** RDAP lookup timeout. */
-export const RDAP_TIMEOUT_MS = 6000;
+export const RDAP_TIMEOUT_MS = 5000;
 
 /**
  * Politeness delay between outbound requests to *different* candidate hosts
@@ -130,9 +132,19 @@ export const INTER_REQUEST_DELAY_MS = 250;
  *  Sectigo; hammering it is how free things stop being free. */
 export const CRTSH_DELAY_MS = 1500;
 
-/** crt.sh can be slow under load. Generous timeout, and we simply skip the
- *  brand this run if it times out - the next run picks it up. */
-export const CRTSH_TIMEOUT_MS = 20000;
+/**
+ * Per-attempt timeout for one crt.sh query.
+ *
+ * Was 20s, which was the direct cause of a production FUNCTION_INVOCATION_TIMEOUT:
+ * three attempts at 20s plus backoff is 66 seconds against a 60-second function
+ * ceiling, so a single slow term could exhaust the entire invocation on its own.
+ *
+ * 10s is comfortably longer than a healthy crt.sh response and lets a full
+ * retry cycle fit inside the job budget below. Every call is additionally
+ * clamped to the remaining budget by lib/util/deadline.ts, so this is an upper
+ * bound rather than a promise.
+ */
+export const CRTSH_TIMEOUT_MS = 10_000;
 
 // ---------------------------------------------------------------------------
 // Recheck cadence.
@@ -170,8 +182,28 @@ export const RETIRE_AFTER_DEAD_RECHECKS = 14;
 export const POLL_BRANDS_PER_RUN = intFromEnv('POLL_BRANDS_PER_RUN', 4);
 export const RECHECK_BATCH_SIZE = intFromEnv('RECHECK_BATCH_SIZE', 25);
 
-/** Stop a job cleanly before the platform kills it mid-write. */
-export const JOB_SOFT_DEADLINE_MS = 50_000;
+/**
+ * The wall-clock budget for one job invocation.
+ *
+ * Must stay meaningfully below `maxDuration` on the job routes (60s, the Vercel
+ * Hobby ceiling). The gap is not padding - it is the time needed to finish the
+ * database writes and build a response after the last unit of work stops. A job
+ * that uses its whole budget on network calls and then gets killed while
+ * writing has done worse than nothing, because the run is not recorded at all.
+ *
+ * Every network call is clamped to the time left, so the job now degrades by
+ * doing less work rather than by dying.
+ */
+export const JOB_SOFT_DEADLINE_MS = 40_000;
+
+/**
+ * Worst-case time to verify a single candidate: DNS, then RDAP, then up to two
+ * content fetches. The recheck job refuses to start another candidate unless
+ * this much budget remains, so it stops cleanly instead of being killed
+ * part-way through one.
+ */
+export const CANDIDATE_VERIFY_BUDGET_MS =
+  DNS_TIMEOUT_MS * 4 + RDAP_TIMEOUT_MS + CONTENT_FETCH_TIMEOUT_MS * 2;
 
 /** Public feed page size. */
 export const FEED_PAGE_SIZE = 50;

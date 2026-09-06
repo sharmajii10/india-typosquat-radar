@@ -1,5 +1,6 @@
 import { CRTSH_DELAY_MS, CRTSH_TIMEOUT_MS, SCANNER_USER_AGENT } from '@/lib/config';
 import type { CertSighting } from '@/lib/types';
+import { boundedTimeout, outOfTime, remainingMs, sleepUntil } from '@/lib/util/deadline';
 import { normalizeCertName } from '@/lib/util/domain';
 
 /**
@@ -92,6 +93,13 @@ export interface PollOptions {
   /** Only return certificates first logged within this many hours. Keeps each
    *  run's working set small and bounded regardless of a term's total history. */
   lookbackHours: number;
+  /**
+   * Absolute epoch-ms deadline for the whole job. Every attempt shrinks its own
+   * timeout to fit inside what is left, and retries stop when the budget is
+   * gone. Without this, one slow term could outlast the entire function
+   * invocation - which is exactly how this route first failed in production.
+   */
+  deadlineAt: number;
   signal?: AbortSignal;
 }
 
@@ -136,17 +144,23 @@ export async function fetchRecentCerts(
   options: PollOptions
 ): Promise<CertQueryResult> {
   let lastError: Error | null = null;
+  let attempts = 0;
 
   for (let attempt = 1; attempt <= CRTSH_ATTEMPTS; attempt++) {
+    // Never begin an attempt there is no time to finish. Starting one anyway is
+    // what produced a 504 with no result recorded at all.
+    if (outOfTime(options.deadlineAt, MIN_ATTEMPT_BUDGET_MS)) break;
+    attempts = attempt;
+
     try {
       const rows = await fetchRows(term, options);
 
-      // An empty array is a 200 response, so the error path above never sees it.
-      // Retry it once anyway: a broad brand term returning zero certificates
-      // ever is not a real answer, and crt.sh recovers on its own often enough
-      // that one more attempt is worth the second and a half it costs.
+      // An empty array arrives as HTTP 200, so the error path never sees it.
+      // Retry once anyway: a broad brand term returning zero certificates ever
+      // is not a real answer, and crt.sh recovers on its own often enough that
+      // one more attempt is worth the second it costs.
       if (rows.length === 0 && attempt < EMPTY_RESPONSE_ATTEMPTS) {
-        await sleep(CRTSH_RETRY_DELAY_MS * attempt);
+        await sleepUntil(options.deadlineAt, CRTSH_RETRY_DELAY_MS * attempt);
         continue;
       }
 
@@ -154,19 +168,31 @@ export async function fetchRecentCerts(
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err));
       if (!isRetryable(lastError) || attempt === CRTSH_ATTEMPTS) break;
-      await sleep(CRTSH_RETRY_DELAY_MS * attempt);
+      await sleepUntil(options.deadlineAt, CRTSH_RETRY_DELAY_MS * attempt);
     }
   }
 
   if (lastError) {
     throw new Error(
-      `crt.sh query for "${term}" failed after ${CRTSH_ATTEMPTS} attempts: ${lastError.message}`
+      `crt.sh query for "${term}" failed after ${attempts} attempt(s): ${lastError.message}`
+    );
+  }
+
+  if (attempts === 0) {
+    throw new Error(
+      `crt.sh query for "${term}" skipped: only ${remainingMs(options.deadlineAt)}ms of ` +
+        `job budget left, which is not enough to attempt it.`
     );
   }
 
   // Every attempt returned an empty array without erroring.
   return { sightings: [], rawRowCount: 0 };
 }
+
+/** Minimum budget worth starting a crt.sh attempt with. Below this the request
+ *  would be aborted before crt.sh could realistically answer, which wastes the
+ *  remaining time and produces a misleading timeout error. */
+const MIN_ATTEMPT_BUDGET_MS = 3000;
 
 function isRetryable(err: Error): boolean {
   if (err.name === 'AbortError' || err.message.includes('aborted')) return true;
@@ -176,17 +202,19 @@ function isRetryable(err: Error): boolean {
   return !err.message.includes('over the') && !err.message.includes('cap');
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 async function fetchRows(term: string, options: PollOptions): Promise<CrtShRow[]> {
   // `%25` is a URL-encoded `%`, which crt.sh treats as a SQL LIKE wildcard.
   // `%term%` therefore matches the term anywhere in any identity on the cert.
   const url = `${CRTSH_ENDPOINT}?q=${encodeURIComponent(`%${term}%`)}&output=json&exclude=expired`;
 
+  // Shrink this attempt's timeout to fit whatever budget is left.
+  const timeoutMs = boundedTimeout(options.deadlineAt, CRTSH_TIMEOUT_MS);
+  if (timeoutMs <= 0) {
+    throw new Error(`crt.sh query for "${term}" skipped: job budget exhausted.`);
+  }
+
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), CRTSH_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   if (options.signal) {
     options.signal.addEventListener('abort', () => controller.abort(), { once: true });
   }
@@ -339,7 +367,7 @@ function cleanIssuer(issuer: string | null): string | null {
   return org ?? cn ?? issuer.slice(0, 200);
 }
 
-/** Politeness delay between crt.sh queries. */
-export function crtshDelay(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, CRTSH_DELAY_MS));
+/** Politeness delay between crt.sh queries, never exceeding the job budget. */
+export function crtshDelay(deadlineAt: number): Promise<void> {
+  return sleepUntil(deadlineAt, CRTSH_DELAY_MS);
 }

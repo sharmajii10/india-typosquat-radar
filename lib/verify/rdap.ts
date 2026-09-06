@@ -1,4 +1,5 @@
 import { RDAP_TIMEOUT_MS, SCANNER_USER_AGENT } from '@/lib/config';
+import { boundedTimeout } from '@/lib/util/deadline';
 import type { RdapResult } from '@/lib/types';
 import { publicSuffix } from '@/lib/util/domain';
 
@@ -44,7 +45,7 @@ interface RdapResponse {
   entities?: RdapEntity[];
 }
 
-export async function lookupRdap(domain: string): Promise<RdapResult> {
+export async function lookupRdap(domain: string, deadlineAt: number): Promise<RdapResult> {
   const empty: RdapResult = {
     ok: false,
     registrar: null,
@@ -55,11 +56,14 @@ export async function lookupRdap(domain: string): Promise<RdapResult> {
   };
 
   try {
-    const base = await rdapServiceFor(domain);
+    const budget = boundedTimeout(deadlineAt, RDAP_TIMEOUT_MS);
+    if (budget <= 0) return { ...empty, error: 'skipped: job budget exhausted' };
+
+    const base = await rdapServiceFor(domain, deadlineAt);
     if (!base) return { ...empty, error: 'no RDAP service published for this TLD' };
 
     const url = `${base.replace(/\/$/, '')}/domain/${encodeURIComponent(domain)}`;
-    const res = await fetchWithTimeout(url, RDAP_TIMEOUT_MS);
+    const res = await fetchWithTimeout(url, boundedTimeout(deadlineAt, RDAP_TIMEOUT_MS));
 
     if (res.status === 404) {
       // The registry says this domain does not exist. That is real information:
@@ -101,8 +105,8 @@ export async function lookupRdap(domain: string): Promise<RdapResult> {
 }
 
 /** Find the RDAP base URL for a domain's TLD via the IANA bootstrap file. */
-async function rdapServiceFor(domain: string): Promise<string | null> {
-  const map = await loadBootstrap();
+async function rdapServiceFor(domain: string, deadlineAt: number): Promise<string | null> {
+  const map = await loadBootstrap(deadlineAt);
   const suffix = publicSuffix(domain);
   const tld = suffix.split('.').pop() ?? '';
 
@@ -111,12 +115,12 @@ async function rdapServiceFor(domain: string): Promise<string | null> {
   return map.get(suffix) ?? map.get(tld) ?? null;
 }
 
-async function loadBootstrap(): Promise<Map<string, string>> {
+async function loadBootstrap(deadlineAt: number): Promise<Map<string, string>> {
   const fresh = bootstrapCache && Date.now() - bootstrapFetchedAt < BOOTSTRAP_TTL_MS;
   if (fresh && bootstrapCache) return bootstrapCache;
 
   try {
-    const res = await fetchWithTimeout(BOOTSTRAP_URL, RDAP_TIMEOUT_MS);
+    const res = await fetchWithTimeout(BOOTSTRAP_URL, boundedTimeout(deadlineAt, RDAP_TIMEOUT_MS));
     if (!res.ok) throw new Error(`bootstrap HTTP ${res.status}`);
     const body = (await res.json()) as { services?: Array<[string[], string[]]> };
 
@@ -164,6 +168,7 @@ function extractRegistrar(body: RdapResponse): string | null {
 }
 
 async function fetchWithTimeout(url: string, timeoutMs: number): Promise<Response> {
+  if (timeoutMs <= 0) throw new Error('skipped: job budget exhausted');
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
