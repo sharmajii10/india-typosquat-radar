@@ -20,6 +20,7 @@
  */
 
 import { parseRows, type CrtShRow } from '../lib/ct/crtsh';
+import { buildInterestFilter } from '../lib/ct/filter';
 import { matchCertName } from '../lib/matching/match';
 import { scoreCandidate } from '../lib/scoring/score';
 import { publishStateForTier } from '../lib/scoring/score';
@@ -461,6 +462,74 @@ function parseCheck(description: string, condition: boolean, detail: string) {
     failures++;
   }
 }
+
+// ===========================================================================
+// The CT scanner's pre-filter contract.
+//
+// The filter decides what the scanner even bothers posting back, so anything it
+// drops is never seen by the matcher, the scorer, or a human. It must therefore
+// be a permissive superset of the matcher: every name the matcher would accept
+// has to survive the filter.
+//
+// A leak here is invisible in production - the pipeline keeps running and
+// simply never finds that class of domain again - which is exactly why it is
+// asserted mechanically.
+// ===========================================================================
+console.log('CT scanner pre-filter\n');
+
+const filterTerms = [...new Set(BRANDS.flatMap((b) => b.match_terms))];
+const isInteresting = buildInterestFilter(filterTerms);
+
+const MUST_PASS = [
+  'hdfcbank.xyz',
+  'hdfcbank-login.com',
+  'www.hdfcbank-secure.tk',
+  'myhdfcbanknet.com',
+  'onlinesbi-verify.co',
+  'paytm-rewards.xyz',
+  'aadhaar-update.in',
+  'hdfcbamk.com',
+  'paytmm.com',
+  // Punycode. The filter has to decode these, not wave them through: the
+  // homoglyph is invisible in the encoded form.
+  'xn--pytm-loa.com'
+];
+
+let filterLeaks = 0;
+for (const name of MUST_PASS) {
+  const matched = matchCertName({ name, brands: BRANDS, allowlist: ALLOWLIST });
+  const passed = isInteresting(name);
+  if (matched && !passed) {
+    filterLeaks++;
+    failures++;
+    console.error(`    FAIL  ${name} matches (${matched.matchKind}) but the filter drops it`);
+  }
+}
+if (filterLeaks === 0) {
+  console.log(`    PASS  every matchable name survives the filter (${MUST_PASS.length} checked)`);
+}
+
+// The other half: the filter has to be tight enough to be worth having. These
+// are real strings that tripped an earlier, looser version - `sbi` inside
+// `joshnesbitt` was being posted to the radar.
+const MUST_NOT_PASS = [
+  'joshnesbitt.co.uk',
+  'google.com',
+  'wikipedia.org',
+  'occupied.com',
+  'phon-repair.com',
+  'consulting-group.net'
+];
+
+const noise = MUST_NOT_PASS.filter((n) => isInteresting(n));
+if (noise.length === 0) {
+  console.log(`    PASS  unrelated names are filtered out (${MUST_NOT_PASS.length} checked)`);
+} else {
+  failures++;
+  console.error(`    FAIL  filter passes unrelated names: ${noise.join(', ')}`);
+}
+
+console.log('');
 
 // --- The safety assertion that matters most --------------------------------
 const publishedLegitimate = CASES.filter(

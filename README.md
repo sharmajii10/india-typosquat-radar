@@ -419,6 +419,53 @@ that would remove the crt.sh dependency below.
 
 ---
 
+## Reading CT logs directly
+
+The primary source is now the Certificate Transparency logs themselves, read
+over RFC 6962, rather than crt.sh.
+
+```bash
+npm run ct:scan -- --dry-run --minutes 3 --logs 3
+```
+
+**Why.** crt.sh is one third-party web front-end. It returns 502s for hours and,
+worse, answers HTTP 200 with an empty array while degraded - a failure that
+looks exactly like a healthy run finding nothing. The logs it reads are operated
+by Google, Cloudflare, DigiCert and Let's Encrypt and are covered by Chrome's
+uptime requirements. Reading them removes the outage dependency and cuts latency
+from "whenever a poll fires" to seconds after issuance.
+
+**How it works.** `scripts/ct-scan.ts` runs in GitHub Actions, not on Vercel - a
+walk through millions of entries does not fit in a 60-second function, which is
+the ceiling that broke the crt.sh poller once already. It reads Chrome's log
+list, picks the least-recently-scanned logs spread across operators, walks
+forward from a stored cursor, and posts anything interesting to
+`/api/jobs/ingest`. It talks to the API rather than the database so the Supabase
+secret key never has to exist in GitHub.
+
+**The pre-filter is the load-bearing piece.** The logs carry millions of
+certificates a day, so names are filtered where they are read.
+`lib/ct/filter.ts` must be a permissive *superset* of `lib/matching/match.ts`:
+anything the matcher would flag has to survive, because whatever the filter
+drops is never seen again by anything. Being wrong permissively costs one HTTP
+round trip; being wrong strictly is a silent, permanent miss. `npm run smoke`
+asserts that contract.
+
+Measured against live logs, it passes **0.033%** of entries. An earlier version
+passed 0.72% - twenty-one times more - because it matched short terms as
+substrings (`sbi` inside `joshnesbitt.co.uk`) and waved every punycode name
+through instead of decoding it.
+
+**Falling behind.** If the cursor drops more than `--max-lag` entries behind the
+head, the scanner jumps forward and records the skip. A live radar reading
+yesterday's certificates is worse than useless: it looks healthy while reporting
+stale results and never catches up.
+
+`supabase/migrations/0003_ct_logs.sql` stores the per-log cursor. Without it the
+scanner still runs, but restarts from each log's head every time and says so.
+
+---
+
 ## Known operational risk: crt.sh availability
 
 **crt.sh is unreliable, and it is the only data source.** This is the biggest

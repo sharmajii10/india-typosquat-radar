@@ -1,0 +1,127 @@
+name: CT Scan
+
+# ---------------------------------------------------------------------------
+# Reads Certificate Transparency logs directly and posts anything resembling a
+# watched brand back to the radar.
+#
+# WHY THIS EXISTS ALONGSIDE Radar
+# -------------------------------
+# Radar polls crt.sh, which is a single third-party web front-end. It returns
+# 502s for hours at a time and, worse, answers HTTP 200 with an empty array
+# while degraded - a failure that looks exactly like a healthy run finding
+# nothing. This job reads the logs crt.sh itself reads, operated by Google,
+# Cloudflare, DigiCert and Let's Encrypt and covered by Chrome's uptime
+# requirements.
+#
+# WHY IT RUNS HERE RATHER THAN ON VERCEL
+# --------------------------------------
+# Reading a log is a long, steady walk through millions of entries. A Vercel
+# function is killed at 60 seconds; that ceiling already broke the crt.sh
+# poller once. A GitHub Actions job can run for hours on a public repository at
+# no cost, which fits the work.
+#
+# It talks to the radar through the authenticated job API, so the Supabase
+# secret key never has to exist in GitHub. GitHub holds only JOB_SECRET.
+#
+# NOTE ON THE SCHEDULE: GitHub throttles scheduled workflows hard. This asks
+# for every 30 minutes and in practice gets roughly every 2 hours. The scanner
+# handles that by skipping ahead when it has fallen too far behind, rather than
+# reading stale certificates forever.
+# ---------------------------------------------------------------------------
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: 'How long to scan for'
+        required: false
+        default: '12'
+      logs:
+        description: 'How many CT logs to cover'
+        required: false
+        default: '4'
+      dryRun:
+        description: 'Read and report without posting anything'
+        type: boolean
+        required: false
+        default: false
+
+concurrency:
+  group: ct-scan
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    # Generous: the job is time-boxed internally by --minutes, and this is only
+    # a backstop against a hang.
+    timeout-minutes: 30
+
+    steps:
+      - name: Check required secrets
+        env:
+          BASE_URL: ${{ secrets.RADAR_BASE_URL }}
+          JOB_SECRET: ${{ secrets.JOB_SECRET }}
+        run: |
+          if [ -z "$BASE_URL" ] || [ -z "$JOB_SECRET" ]; then
+            echo "::error::RADAR_BASE_URL and JOB_SECRET must both be set as repository secrets."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Scan Certificate Transparency logs
+        env:
+          JOB_TARGET_URL: ${{ secrets.RADAR_BASE_URL }}
+          JOB_SECRET: ${{ secrets.JOB_SECRET }}
+        run: |
+          set -euo pipefail
+          npm run ct:scan -- \
+            --minutes "${{ github.event.inputs.minutes || '12' }}" \
+            --logs "${{ github.event.inputs.logs || '4' }}" \
+            ${{ github.event.inputs.dryRun == 'true' && '--dry-run' || '' }} \
+            | tee scan.log
+
+      - name: Verify and score what was found
+        if: github.event.inputs.dryRun != 'true'
+        env:
+          BASE_URL: ${{ secrets.RADAR_BASE_URL }}
+          JOB_SECRET: ${{ secrets.JOB_SECRET }}
+        run: |
+          set -euo pipefail
+          status=$(curl --silent --show-error --location \
+            --max-time 120 \
+            --write-out '%{http_code}' \
+            --output recheck.json \
+            --request POST \
+            --header "Authorization: Bearer ${JOB_SECRET}" \
+            "${BASE_URL}/api/jobs/recheck")
+          echo "HTTP ${status}"
+          head -c 3000 recheck.json; echo
+          if [ "$status" -lt 200 ] || [ "$status" -ge 300 ]; then
+            echo "::error::Recheck failed with HTTP ${status}"
+            exit 1
+          fi
+
+      - name: Summarise
+        if: always()
+        run: |
+          {
+            echo "### CT scan"
+            echo ""
+            echo '```'
+            tail -c 3000 scan.log 2>/dev/null || echo "no scan output"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

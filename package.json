@@ -15,7 +15,8 @@
     "check:weights": "tsx scripts/check-weights.ts",
     "job:review": "tsx scripts/run-job.ts review",
     "smoke": "tsx scripts/smoke-test.ts",
-    "check:rls": "tsx scripts/check-rls.ts"
+    "check:rls": "tsx scripts/check-rls.ts",
+    "ct:scan": "tsx scripts/ct-scan.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",
