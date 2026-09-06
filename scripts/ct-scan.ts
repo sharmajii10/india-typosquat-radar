@@ -117,6 +117,8 @@ async function main() {
   let totalSightings = 0;
   let totalUnparsed = 0;
   let totalSkipped = 0;
+  let logFailures = 0;
+  let logsAttempted = 0;
 
   for (const log of chosen) {
     if (Date.now() >= deadlineAt) {
@@ -124,6 +126,7 @@ async function main() {
       break;
     }
 
+    logsAttempted++;
     const cursor = cursorFor.get(log.url);
     const fromIndex = Number(cursor?.last_index ?? 0);
     const logDeadline = Math.min(deadlineAt, Date.now() + perLogBudget);
@@ -134,14 +137,25 @@ async function main() {
     );
 
     const started = Date.now();
-    const result = await scanLog({
+    let result: Awaited<ReturnType<typeof scanLog>>;
+    try {
+      result = await scanLog({
       logUrl: log.url,
       fromIndex,
       deadlineAt: logDeadline,
       maxEntries: args.maxEntriesPerLog,
-      maxLag: args.maxLag,
-      isInteresting
-    });
+        maxLag: args.maxLag,
+        isInteresting
+      });
+    } catch (err) {
+      // One unreachable or misbehaving log must not end the run. The others are
+      // independent, and this log is retried next time.
+      logFailures++;
+      console.error(
+        `  ERROR reading this log: ${err instanceof Error ? err.message : err}`
+      );
+      continue;
+    }
 
     if (result.entriesSkipped > 0) {
       console.log(
@@ -173,7 +187,14 @@ async function main() {
     // Post even when nothing was found: the cursor advance is the point, and
     // losing it means re-reading the same entries forever.
     if (!args.dryRun && result.entriesRead > 0) {
-      await postBatch(args, log, result);
+      try {
+        await postBatch(args, log, result);
+      } catch (err) {
+        logFailures++;
+        console.error(
+          `  ERROR posting results: ${err instanceof Error ? err.message : err}`
+        );
+      }
     }
   }
 
@@ -187,6 +208,18 @@ async function main() {
   if (totalEntries > 0) {
     const rate = ((totalSightings / totalEntries) * 100).toFixed(4);
     console.log(`Hit rate     : ${rate}% of entries matched the watchlist`);
+  }
+  if (logFailures > 0) {
+    console.log(`Log failures : ${logFailures} of ${logsAttempted}`);
+  }
+
+  // Fail the job only if nothing worked. A partial run is a normal outcome -
+  // logs go down, and the cursor means the next run picks up where this
+  // stopped. Failing on any single error would make the workflow permanently
+  // red for a condition the design already handles.
+  if (logsAttempted > 0 && logFailures === logsAttempted) {
+    console.error('\nEvery log failed. Treating this run as a failure.');
+    process.exitCode = 1;
   }
 }
 
@@ -209,13 +242,33 @@ async function getState(args: Args): Promise<StateResponse> {
     return { logs: [], terms, brandCount: body.brands?.length ?? 0 };
   }
 
-  const res = await fetch(`${args.base}/api/jobs/ingest`, {
-    headers: { authorization: `Bearer ${args.secret}` }
-  });
-  if (!res.ok) {
-    throw new Error(`could not read scanner state: HTTP ${res.status}`);
+  const url = `${args.base}/api/jobs/ingest`;
+
+  let res: Response;
+  try {
+    res = await fetch(url, { headers: { authorization: `Bearer ${args.secret}` } });
+  } catch (err) {
+    // A malformed base URL lands here, which is the most likely cause when this
+    // works locally and fails in CI - a secret with a stray newline or a
+    // missing scheme produces exactly this.
+    throw new Error(
+      `could not reach ${JSON.stringify(url)}: ${err instanceof Error ? err.message : err}`
+    );
   }
-  return (await res.json()) as StateResponse;
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(
+      `could not read scanner state from ${url}: HTTP ${res.status} ${body.slice(0, 300)}` +
+        (res.status === 401 ? '  (JOB_SECRET does not match the deployment)' : '')
+    );
+  }
+
+  const state = (await res.json()) as StateResponse;
+  if (!Array.isArray(state.terms)) {
+    throw new Error(`unexpected response from ${url}: no terms array`);
+  }
+  return state;
 }
 
 async function postBatch(
