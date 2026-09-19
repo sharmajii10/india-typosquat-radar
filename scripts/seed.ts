@@ -89,7 +89,15 @@ const BRAND_SEED: BrandSeed[] = [
     category: 'bank',
     officialDomains: ['icicibank.com', 'icicibank.bank.in'],
     aliases: ['icici', 'icicibank'],
-    extraTerms: ['icicidirect', 'imobile']
+    extraTerms: ['icicidirect'],
+    // `imobile` is ICICI's real app name and still had to go: it is a single
+    // edit from `mobile`, so fuzzy matching flagged every domain containing
+    // that word - minimobile.ir, vmobile.ie, evviva-mobile.com, donate-mobile
+    // .com and more, seven in the first fortnight. Restricting it to whole
+    // tokens would not have helped, because the collision is in the fuzzy
+    // branch rather than the substring one. Anything genuinely impersonating
+    // iMobile almost always carries `icici` too, which is still matched.
+    excludeTerms: ['imobile']
   },
   {
     name: 'Axis Bank',
@@ -157,7 +165,14 @@ const BRAND_SEED: BrandSeed[] = [
     name: 'Union Bank of India',
     slug: 'union-bank',
     category: 'bank',
-    officialDomains: ['unionbankofindia.co.in', 'unionbankonline.co.in'],
+    // unionbankofindia.bank.in is the bank's own RBI-mandated domain. It was
+    // missing here, so the radar flagged the bank's real website as a lookalike
+    // of itself and sat it in the review queue.
+    officialDomains: [
+      'unionbankofindia.co.in',
+      'unionbankonline.co.in',
+      'unionbankofindia.bank.in'
+    ],
     aliases: ['unionbankofindia', 'unionbankonline'],
     // Note what is NOT here: `union`. The term deriver only ever collapses the
     // whole brand name, so `union` is never generated - but adding it as an
@@ -180,7 +195,10 @@ const BRAND_SEED: BrandSeed[] = [
     name: 'IDFC First Bank',
     slug: 'idfc-first',
     category: 'bank',
-    officialDomains: ['idfcfirstbank.com'],
+    // idfcfirst.bank.in, not idfcfirstbank.bank.in - the latter was the guess
+    // checked when this brand was added, it did not resolve, and the real one
+    // was therefore left out and promptly flagged as a lookalike of itself.
+    officialDomains: ['idfcfirstbank.com', 'idfcfirst.bank.in'],
     aliases: ['idfc', 'idfcfirst', 'idfcfirstbank']
   },
   {
@@ -284,11 +302,19 @@ const BRAND_SEED: BrandSeed[] = [
     slug: 'cred',
     category: 'payment',
     officialDomains: ['cred.club'],
-    // `cred` is four characters, so whole-token matching only: `cred-upi.in`
-    // matches, `credit-union.com` does not, because `credit` is a different
-    // token rather than a string containing this one.
     aliases: ['cred', 'credclub'],
-    extraTerms: ['credupi']
+    extraTerms: ['credupi'],
+    // Whole-token matching was supposed to make `cred` safe, and it is exactly
+    // what made it dangerous: hyphens are token separators, so every
+    // `<something>-cred.<tld>` domain matched it as a complete word. Seven
+    // arrived in a fortnight - themedi-cred.com and five siblings, plus
+    // bi-cred.cl. "cred" is a productive suffix in medical and financial
+    // naming, so this is not a one-off collision.
+    //
+    // The cost is real: CRED now only matches `credclub` and `credupi`, so a
+    // bare `cred-upi.in` would slip through. A brand whose name is an ordinary
+    // word fragment may simply not be watchable by name alone.
+    excludeTerms: ['cred']
   },
 
   // --- Government ----------------------------------------------------------

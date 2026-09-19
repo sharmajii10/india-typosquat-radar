@@ -16,7 +16,8 @@
     "job:review": "tsx scripts/run-job.ts review",
     "smoke": "tsx scripts/smoke-test.ts",
     "check:rls": "tsx scripts/check-rls.ts",
-    "ct:scan": "tsx scripts/ct-scan.ts"
+    "ct:scan": "tsx scripts/ct-scan.ts",
+    "prune": "tsx scripts/prune-queue.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",

@@ -33,6 +33,58 @@ import {
  *  must match a whole token. */
 const MIN_TERM_LENGTH_FOR_SUBSTRING = 5;
 
+/**
+ * Terms that may only ever match a whole token, however long they are.
+ *
+ * Length is a poor proxy for distinctiveness. Every term below clears the
+ * length bar and is still a common word - or a fragment of one - somewhere in
+ * the world, and substring matching on them produced almost the entire review
+ * queue in the first two weeks of running: 9 Indonesian sites for `kotak`, an
+ * Italian estate agent for `uidai`, a US tax preparer for `incometax`.
+ *
+ * Three of them were worse than noise. `kotak78.com`, `gogurupay.com` and
+ * `phone-perdido.help` were auto-published as high-confidence detections purely
+ * because the brand string happened to sit inside an unrelated word. Restricting
+ * these terms to whole tokens is what stops that recurring: `kotak-login.com`
+ * still matches, `nasikotakindonesia.com` no longer does.
+ *
+ * Adding a term here costs the "brand glued to a word" pattern for that term
+ * (`paytmlogin.com` style). That trade is only worth making when the term
+ * demonstrably collides with ordinary language, so add to this list from
+ * evidence in the queue, not from suspicion.
+ */
+/**
+ * Words a fuzzy match is never allowed to land on.
+ *
+ * A typosquat is a *misspelling* of a brand. When the thing our term is close
+ * to is a correctly spelled everyday word, the resemblance is a coincidence of
+ * the alphabet, not an attempt at anything - and the domain that contains it is
+ * almost always an ordinary business.
+ *
+ * Every entry here was found by measurement rather than guessed at:
+ *   phone  - 2 edits from `phonepe`. phone-perdido.help ("lost phone") was
+ *            auto-published as a PhonePe detection on the strength of it.
+ *   mobile - 1 edit from ICICI's `imobile`, which matched seven unrelated
+ *            domains in a fortnight before the term was dropped entirely.
+ *   canary - 1 edit from `canara`. AWS issues certificates for
+ *            canary.s3.<region>.vpce.amazonaws.com in enormous volume; this
+ *            took the CT pre-filter from 0.033% of entries to 1.63%.
+ *
+ * Only the probe is rejected, not the whole comparison, so `phonpe.com` still
+ * matches on distance 1 while `phone-repair.com` no longer matches at all.
+ * Keep adding from evidence, not from suspicion.
+ */
+const FUZZY_STOPWORD_PROBES = new Set(['phone', 'mobile', 'canary']);
+
+const TOKEN_ONLY_TERMS = new Set([
+  'kotak', //     Indonesian and Malay for "box". nasi kotak, kepala kotak, PAFI Kota Klaten.
+  'uidai', //     sits inside the Italian "immobiliare" - laguidaimmobiliare.it.
+  'incometax', // incometaxwashington.com is a US tax preparer, not a phishing site.
+  'airtel', //    inside "airtelecom", a telecoms company with no Airtel connection.
+  'rupay', //     inside "gogurupay" - published as a detection before this existed.
+  'phonepe' //    inside "phoneperdido" - Spanish for "lost phone". Also published.
+]);
+
 /** Ranked worst-to-best so a stronger match kind always wins for a domain. */
 const MATCH_KIND_RANK: Record<MatchKind, number> = {
   substring: 1,
@@ -148,7 +200,11 @@ function evaluateTerm(args: EvalArgs): MatchResult | null {
     why = `The name is exactly "${term}" under a different top-level domain.`;
   }
   // --- 3. Substring, long terms only. `myhdfcbanknet.com`. ------------------
-  else if (term.length >= MIN_TERM_LENGTH_FOR_SUBSTRING && flat.includes(term)) {
+  else if (
+    term.length >= MIN_TERM_LENGTH_FOR_SUBSTRING &&
+    !TOKEN_ONLY_TERMS.has(term) &&
+    flat.includes(term)
+  ) {
     kind = 'substring';
     distance = 0;
     why = `The name contains "${term}" inside a longer word.`;
@@ -165,6 +221,8 @@ function evaluateTerm(args: EvalArgs): MatchResult | null {
     for (const probe of [flat, ...tokens]) {
       // Skip probes whose length is too far off to possibly be within bound.
       if (Math.abs(probe.length - term.length) > MAX_EDIT_DISTANCE) continue;
+      // A correctly spelled everyday word is not a misspelling of a brand.
+      if (FUZZY_STOPWORD_PROBES.has(probe)) continue;
       const d = damerauLevenshtein(probe, term, MAX_EDIT_DISTANCE);
       if (d < bestDistance) {
         bestDistance = d;

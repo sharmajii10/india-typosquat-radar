@@ -351,6 +351,45 @@ Add the brand's subsidiaries and campaign domains to `ALLOWLIST_SEED` in the sam
 file. Allowlisted domains are excluded at the very top of the pipeline and can
 never be flagged.
 
+### Two safety nets in the matcher
+
+Some terms cannot be dropped — `uidai` and `phonepe` are the whole point of
+watching those brands — but are still unsafe in one particular matching mode.
+`lib/matching/match.ts` holds two lists for that, both populated only from
+things that actually went wrong:
+
+- **`TOKEN_ONLY_TERMS`** — may match a whole token but never a substring.
+  `kotak-login.com` still matches; `nasikotakindonesia.com` does not, because
+  `kotak` is Indonesian for "box". Also covers `uidai` (inside the Italian
+  *immobiliare*), `incometax`, `airtel`, `rupay` and `phonepe`.
+- **`FUZZY_STOPWORD_PROBES`** — words a fuzzy match may never land on. A
+  typosquat is a *misspelling* of a brand; when the nearest thing is a
+  correctly spelled everyday word, the resemblance is a coincidence of the
+  alphabet. `phone` is two edits from `phonepe`, `mobile` one from `imobile`,
+  `canary` one from `canara`.
+
+The cost of each is specific and worth knowing: a token-only term no longer
+catches the brand glued to a word without a separator, so `paytmlogin.com`
+would be missed if `paytm` were ever added to that list.
+
+### When you change a term, prune the queue
+
+Dropping a bad term does not remove the candidates it already produced. Those
+rows sit in the review queue looking exactly like real judgement calls, and a
+reviewer cannot tell from the row which is which.
+
+```bash
+npm run prune              # report what no longer matches, write nothing
+npm run prune -- --apply   # retire those rows
+```
+
+It re-runs the current matcher over every live candidate and hides the ones
+that no longer match. It hides rather than clears, deliberately: `clear` writes
+a permanent allowlist row meaning "a person looked at this and it is
+legitimate", and nobody did. All this knows is that our own terms changed.
+
+Correcting six terms took the queue from 51 rows to 19.
+
 ### Measure the term before you trust it
 
 Reading the seed output is not enough — `canara` looked fine there. After
